@@ -17,6 +17,7 @@ fetch → analyze → draft → human review → learn
    - **RAG over past replies** (`app/embeddings.py`) — retrieves similar previously-approved answers so drafts sound like the company, not like a generic LLM
 4. **Dashboard** (FastAPI + `app/static/`) — human approves, edits or rejects every draft
 5. **Self-tuning** (`app/sender_memory.py`, `app/workers/proposer.py`) — learns per-sender context and proposes playbook improvements based on human edits
+6. **Auto-reply** (`app/auto_reply.py`) — optional: once a mail category has earned trust, replies can be sent automatically instead of waiting for review (ships with `dry_run` enabled by default — human-in-the-loop is the default mode)
 
 ## Anti-hallucination by design
 
