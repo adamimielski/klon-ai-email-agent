@@ -1,0 +1,1086 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Klon — agent mailowy</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body {
+    font-family: 'Inter', -apple-system, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background: #fafafa;
+  }
+  .truncate-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  [x-cloak] { display: none !important; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  .mail-body a { color: #18181b; text-decoration: underline; word-break: break-all; }
+  .mail-body a:hover { color: #000; }
+  .agent-log { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+  /* Chat bubble fade-in */
+  @keyframes fade-up { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+  .bubble-in { animation: fade-up 0.4s ease-out; }
+
+  /* Subtle scroll */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="text-zinc-900">
+<div x-data="dashboard()" x-init="init()" class="max-w-5xl mx-auto p-4 md:p-6">
+
+  <!-- ========== TOP NAV ========== -->
+  <header class="flex items-center justify-between mb-6 pb-4 border-b border-zinc-200">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-zinc-900 text-white flex items-center justify-center text-sm font-bold">K</div>
+      <div>
+        <h1 class="text-base font-semibold text-zinc-900 leading-tight">Klon</h1>
+        <p class="text-[11px] text-zinc-500 leading-tight">agent mailowy</p>
+      </div>
+    </div>
+    <div class="text-xs text-zinc-500 flex items-center gap-3">
+      <span x-show="stats" class="hidden md:inline mono text-[11px] text-zinc-500">
+        <span x-text="stats?.cost_month_pln?.toFixed(2)"></span> zł / mc
+      </span>
+      <button @click="refresh()" :disabled="loading"
+              class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-md text-xs font-medium disabled:opacity-40 transition">
+        Odśwież
+      </button>
+    </div>
+  </header>
+
+  <!-- ========== CHAT Z KLONEM (zamiast briefu) ========== -->
+  <section class="mb-6">
+    <div class="flex items-start gap-3 bubble-in">
+      <!-- Avatar -->
+      <div class="w-10 h-10 rounded-full bg-zinc-900 text-white flex items-center justify-center text-base font-semibold flex-shrink-0">
+        K
+      </div>
+      <!-- Bubble -->
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline gap-2 mb-1.5">
+          <span class="font-semibold text-sm text-zinc-900">Klon</span>
+          <span class="text-[11px] text-emerald-600 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-dot"></span>
+            aktywny
+          </span>
+          <span class="text-[11px] text-zinc-400" x-text="status?.last_action?.timestamp ? formatTime(status.last_action.timestamp) : 'teraz'"></span>
+        </div>
+        <div class="bg-white rounded-2xl rounded-tl-sm border border-zinc-200 p-5 max-w-3xl">
+          <!-- Message -->
+          <div class="text-[15px] leading-relaxed text-zinc-800 whitespace-pre-line" x-text="briefSummary.message"></div>
+
+          <!-- Najpilniejsze (mini-card) -->
+          <div x-show="status?.urgent" class="mt-4 p-3 rounded-lg bg-zinc-50 border border-zinc-200 flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-red-600 flex-shrink-0">⚡</div>
+            <div class="flex-1 min-w-0 text-sm">
+              <div class="font-semibold text-zinc-900 truncate" x-text="status?.urgent?.subject || ''"></div>
+              <div class="text-xs text-zinc-500 truncate">
+                od <b class="text-zinc-700" x-text="status?.urgent?.from || ''"></b>
+                · <span x-text="categoryLabel(status?.urgent?.category) || ''"></span>
+                · pilność <span x-text="status?.urgent?.urgency || '?'"></span>/5
+              </div>
+            </div>
+            <button @click="openMail(status.urgent.id)"
+                    class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-md text-xs font-medium whitespace-nowrap transition">
+              Otwórz
+            </button>
+          </div>
+
+          <!-- Quick replies (suggested actions) -->
+          <div class="mt-4 flex gap-1.5 flex-wrap">
+            <button x-show="(status?.pending?.drafts_to_review || 0) > 0"
+                    @click="quickFilter('drafted')"
+                    class="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-md text-xs font-medium transition flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              Drafty <span class="text-zinc-500" x-text="'(' + (status?.pending?.drafts_to_review || 0) + ')'"></span>
+            </button>
+            <button x-show="(status?.pending?.decisions || 0) > 0"
+                    @click="quickFilter('needs_decision')"
+                    class="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-md text-xs font-medium transition flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              Decyzje <span class="text-zinc-500" x-text="'(' + (status?.pending?.decisions || 0) + ')'"></span>
+            </button>
+            <button x-show="(status?.pending?.auto_replied_today || 0) > 0"
+                    @click="quickFilter('auto_replied')"
+                    class="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-md text-xs font-medium transition flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
+              Sam odpowiedziałem <span class="text-zinc-500" x-text="'(' + (status?.pending?.auto_replied_today || 0) + ')'"></span>
+            </button>
+            <button x-show="(status?.pending?.auto_archived_today || 0) > 0"
+                    @click="quickFilter('archived')"
+                    class="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-md text-xs font-medium transition flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+              Powiadomienia <span class="text-zinc-500" x-text="'(' + (status?.pending?.auto_archived_today || 0) + ')'"></span>
+            </button>
+            <button @click="quickFilter('all')"
+                    class="px-3 py-1.5 text-zinc-600 hover:text-zinc-900 rounded-md text-xs font-medium transition">
+              Wszystkie
+            </button>
+          </div>
+
+          <!-- Ostatnia akcja Klona (informacyjnie) -->
+          <div x-show="status?.last_action?.message" class="mt-4 pt-3 border-t border-zinc-100 text-[11px] text-zinc-500 flex items-center gap-1.5">
+            <span class="mono text-zinc-400">›</span>
+            <span x-text="status?.last_action?.message" class="truncate"></span>
+          </div>
+        </div>
+
+        <!-- Historia chatu (bubble messages pod briefem) -->
+        <template x-for="(msg, idx) in chatHistory" :key="idx">
+          <div class="mt-3" :class="msg.role === 'user' ? 'flex justify-end' : ''">
+            <div :class="msg.role === 'user'
+                  ? 'bg-zinc-900 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-md text-sm'
+                  : 'bg-white border border-zinc-200 rounded-2xl rounded-tl-sm p-4 max-w-2xl'">
+              <div x-show="msg.role === 'assistant'" class="flex items-baseline gap-2 mb-1.5">
+                <span class="font-semibold text-xs text-zinc-900">Klon</span>
+                <span class="text-[10px] text-zinc-400 mono" x-text="msg.timestamp || ''"></span>
+              </div>
+              <div class="whitespace-pre-line leading-relaxed" x-text="msg.content"></div>
+              <!-- Wyniki search_mails -->
+              <template x-if="msg.actions?.length">
+                <div class="mt-3 pt-3 border-t border-zinc-100 space-y-2">
+                  <template x-for="(act, ai) in msg.actions" :key="ai">
+                    <div>
+                      <!-- search_mails wynik z linkami -->
+                      <template x-if="act.tool === 'search_mails' && act.result?.mails?.length">
+                        <div>
+                          <div class="text-[11px] text-zinc-500 mb-1.5 mono">
+                            znalazłem <span x-text="act.result.count"></span> maili
+                          </div>
+                          <div class="space-y-1">
+                            <template x-for="m in act.result.mails" :key="m.id">
+                              <button @click="openMail(m.id)"
+                                      class="w-full text-left p-2 rounded-md bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 transition group">
+                                <div class="flex items-baseline justify-between gap-2">
+                                  <span class="font-medium text-xs text-zinc-900 truncate" x-text="m.from"></span>
+                                  <span class="text-[10px] text-zinc-400 mono whitespace-nowrap" x-text="formatTime(m.received_at)"></span>
+                                </div>
+                                <div class="text-[11px] text-zinc-700 truncate mt-0.5" x-text="m.subject"></div>
+                                <div class="text-[10px] text-zinc-500 truncate mt-0.5">
+                                  <span x-text="categoryLabel(m.category)"></span> · <span x-text="m.status"></span>
+                                </div>
+                              </button>
+                            </template>
+                          </div>
+                        </div>
+                      </template>
+                      <!-- Inne tools - mała plakietka -->
+                      <template x-if="act.tool !== 'search_mails'">
+                        <div class="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                          <span class="px-1.5 py-0.5 rounded bg-zinc-100 mono" x-text="act.tool"></span>
+                          <span x-show="act.result?.proposal_id" class="text-emerald-600">→ propozycja #<span x-text="act.result.proposal_id"></span></span>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- Pole input -->
+        <div class="mt-3 flex items-center gap-2">
+          <input type="text"
+                 x-model="chatInput"
+                 @keydown.enter="sendChat()"
+                 :disabled="chatLoading"
+                 placeholder="Powiedz Klonowi co poprawić..."
+                 class="flex-1 px-3 py-2 bg-white border border-zinc-200 rounded-lg text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:border-zinc-400 transition disabled:opacity-50">
+          <button @click="sendChat()"
+                  :disabled="chatLoading || !chatInput.trim()"
+                  class="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium disabled:opacity-30 transition flex items-center gap-1.5">
+            <span x-show="!chatLoading">Wyślij</span>
+            <span x-show="chatLoading">...</span>
+          </button>
+          <button x-show="chatHistory.length > 0"
+                  @click="chatHistory = []"
+                  class="px-3 py-2 text-zinc-500 hover:text-zinc-900 text-xs transition">Reset</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== SKRZYNKI ========== -->
+  <section class="mb-5">
+    <h2 class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Skrzynki</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+      <button @click="selectAccount(null)"
+              :class="selectedAccountId === null ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-700 border-zinc-200 hover:border-zinc-400'"
+              class="rounded-lg p-3 border text-left transition-all">
+        <div class="flex items-center justify-between gap-2 mb-0.5">
+          <div class="font-semibold text-sm">Wszystkie</div>
+          <span x-show="totalPending > 0"
+                class="mono text-[10px] font-semibold"
+                :class="selectedAccountId === null ? 'text-zinc-300' : 'text-zinc-500'"
+                x-text="totalPending"></span>
+        </div>
+        <div class="text-[11px]" :class="selectedAccountId === null ? 'text-zinc-400' : 'text-zinc-500'">
+          <span x-text="accounts.length"></span> skrzynek
+        </div>
+      </button>
+      <template x-for="a in accounts" :key="a.id">
+        <button @click="selectAccount(a.id)"
+                :class="selectedAccountId === a.id ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-700 border-zinc-200 hover:border-zinc-400'"
+                class="rounded-lg p-3 border text-left transition-all">
+          <div class="flex items-center justify-between gap-2 mb-0.5">
+            <div class="font-semibold text-sm truncate" x-text="a.label || a.email"></div>
+            <span x-show="a.pending_count > 0"
+                  class="mono text-[10px] font-semibold flex-shrink-0"
+                  :class="selectedAccountId === a.id ? 'text-zinc-300' : 'text-zinc-500'"
+                  x-text="a.pending_count"></span>
+          </div>
+          <div class="text-[11px] truncate mono" :class="selectedAccountId === a.id ? 'text-zinc-400' : 'text-zinc-500'" x-text="a.email"></div>
+        </button>
+      </template>
+    </div>
+  </section>
+
+  <!-- ========== PROPOZYCJE SELF-TUNING ========== -->
+  <section x-show="proposals.length > 0" class="mb-5">
+    <button @click="proposalsOpen = !proposalsOpen"
+            class="w-full flex items-center justify-between p-3 rounded-lg bg-purple-50 border border-purple-200 hover:bg-purple-100 transition">
+      <div class="flex items-center gap-2 text-sm">
+        💡 <b class="text-purple-900">Propozycje aktualizacji</b>
+        <span class="text-purple-700" x-text="proposals.length + ' do przejrzenia'"></span>
+      </div>
+      <span class="text-xs text-purple-700" x-text="proposalsOpen ? '▲' : '▼'"></span>
+    </button>
+    <div x-show="proposalsOpen" x-cloak class="mt-2 space-y-2">
+      <template x-for="p in proposals" :key="p.id">
+        <div class="bg-white rounded-lg shadow-sm border-l-4 border border-slate-200 p-3"
+             :class="p.target === 'klon_md' ? 'border-l-blue-500' : 'border-l-amber-500'">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="text-xs uppercase font-medium"
+                   :class="p.target === 'klon_md' ? 'text-blue-700' : 'text-amber-700'"
+                   x-text="p.target === 'klon_md' ? 'Styl (KLON.md) — auto-zapis' : 'Fakty (firma.yaml) — TY ręcznie edytujesz'"></div>
+              <div class="font-medium text-sm mt-1" x-text="p.title"></div>
+              <div class="text-xs text-slate-600 mt-1" x-text="p.description"></div>
+              <div x-show="p.target === 'firma_yaml'" class="text-xs text-amber-700 mt-1 italic">
+                ⚠️ Akceptacja = tylko zaznaczenie "do zrobienia". Plik firma.yaml musisz edytować sam.
+              </div>
+              <details class="mt-2 text-xs">
+                <summary class="cursor-pointer text-slate-500">Propozycja zmiany</summary>
+                <pre class="mt-1 p-2 bg-slate-50 rounded whitespace-pre-wrap" x-text="p.proposed_change"></pre>
+              </details>
+            </div>
+            <div class="flex flex-col gap-1">
+              <button @click="acceptProposal(p)" class="px-3 py-1 bg-green-600 text-white rounded text-xs">✓ Akceptuj</button>
+              <button @click="rejectProposal(p.id)" class="px-3 py-1 bg-slate-200 text-slate-700 rounded text-xs">✗ Odrzuć</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- ========== FILTRY ========== -->
+  <section class="mb-3 flex gap-1 flex-wrap items-center">
+    <template x-for="f in filters" :key="f.value || 'all'">
+      <button @click="filter = f.value; clientFilter = null; reload()"
+              :class="filter === f.value && !clientFilter ? 'bg-zinc-900 text-white' : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'"
+              class="px-2.5 py-1 rounded-md text-xs font-medium transition"
+              x-text="f.label"></button>
+    </template>
+    <span x-show="clientFilter === 'needs_decision'"
+          class="px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-900 text-white flex items-center gap-1.5">
+      Decyzje
+      <button @click="clientFilter = null; reload()" class="hover:text-zinc-300 text-base leading-none -mt-0.5">×</button>
+    </span>
+    <span x-show="clientFilter === 'auto_replied'"
+          class="px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-900 text-white flex items-center gap-1.5">
+      Sam odpowiedziałem
+      <button @click="clientFilter = null; reload()" class="hover:text-zinc-300 text-base leading-none -mt-0.5">×</button>
+    </span>
+  </section>
+
+  <!-- ========== LISTA MAILI ========== -->
+  <section id="mail-list" class="bg-white rounded-xl border border-zinc-200 divide-y divide-zinc-100 overflow-hidden">
+    <template x-if="loading">
+      <div class="p-8 text-center text-zinc-400 text-sm">Ładuję…</div>
+    </template>
+    <template x-if="!loading && filteredMails.length === 0">
+      <div class="p-12 text-center">
+        <div class="w-10 h-10 mx-auto mb-3 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-400">∅</div>
+        <div class="text-sm text-zinc-500">Brak maili w tym widoku</div>
+      </div>
+    </template>
+    <template x-for="m in filteredMails" :key="m.id">
+      <div class="p-4 hover:bg-zinc-50 cursor-pointer transition-colors" @click="openMail(m.id)">
+        <div class="flex items-baseline gap-2 mb-0.5">
+          <span class="font-semibold text-sm truncate flex-1 text-zinc-900" x-text="m.from_name || m.from_email"></span>
+          <span class="text-[11px] text-zinc-400 mono whitespace-nowrap" x-text="formatTime(m.received_at)"></span>
+        </div>
+        <div class="text-sm text-zinc-700 truncate mb-1" x-text="m.subject"></div>
+        <div class="text-xs text-zinc-500 truncate-2 leading-relaxed" x-text="m.summary || ''"></div>
+        <div class="flex gap-1.5 mt-2 text-xs flex-wrap items-center">
+          <!-- Status pill (główny) -->
+          <span x-show="m.status === 'sent' && m.auto_replied"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium text-[11px]">
+            <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> wysłane przez Klona
+          </span>
+          <span x-show="m.status === 'sent' && !m.auto_replied"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-600 border border-zinc-200 text-[11px]">
+            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400"></span> wysłane
+          </span>
+          <span x-show="m.status === 'drafted'"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium text-[11px]">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> draft gotowy
+          </span>
+          <span x-show="m.draft_strategy === 'needs_decision' && m.status !== 'sent' && m.status !== 'drafted'"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 font-medium text-[11px]">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> wymaga decyzji
+          </span>
+          <!-- Kategoria -->
+          <span x-show="m.category"
+                class="px-2 py-0.5 rounded-md text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200"
+                x-text="categoryLabel(m.category)"></span>
+          <!-- SLA -->
+          <template x-if="needsResponseSLA(m)">
+            <span class="px-2 py-0.5 rounded-md mono text-[11px] border"
+                  :class="slaClass(m)"
+                  x-text="slaLabel(m)"></span>
+          </template>
+          <span x-show="m.urgency >= 4" class="px-2 py-0.5 rounded-md text-[11px] bg-red-50 text-red-700 border border-red-200 font-medium">pilne</span>
+          <span x-show="m.has_attachments" class="px-2 py-0.5 rounded-md text-[11px] bg-zinc-50 text-zinc-600 border border-zinc-200">załącznik</span>
+          <span x-show="m.injection_risk === 'high'" class="px-2 py-0.5 rounded-md text-[11px] bg-red-100 text-red-800 border border-red-300 font-medium">injection</span>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ========== MODAL ========== -->
+  <div x-show="selected" x-cloak @keydown.escape.window="selected=null"
+       class="fixed inset-0 bg-zinc-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+       @click.self="selected=null">
+    <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-zinc-200">
+      <template x-if="selected">
+        <div>
+          <div class="flex items-start justify-between mb-3">
+            <div>
+              <h3 class="text-lg font-semibold" x-text="selected.subject"></h3>
+              <p class="text-sm text-slate-600 mt-1">
+                <b x-text="selected.from_name || selected.from_email"></b>
+                <span x-text="selected.from_name ? ' &lt;' + selected.from_email + '&gt;' : ''"></span>
+              </p>
+              <p class="text-xs text-slate-500" x-text="formatTime(selected.received_at)"></p>
+            </div>
+            <button @click="selected=null" class="text-2xl text-slate-400 hover:text-slate-700">×</button>
+          </div>
+
+          <!-- HISTORIA NADAWCY -->
+          <template x-if="selected.sender_history">
+            <div class="mt-3 p-3 rounded border"
+                 :class="selected.sender_history.total_received > 0 ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'">
+              <div class="text-xs font-medium text-slate-700 mb-1 flex items-center gap-2">
+                🧠 Co Klon wie o nadawcy
+                <span x-show="selected.sender_history.total_received > 0"
+                      class="text-[10px] bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded-full"
+                      x-text="selected.sender_history.total_received + ' wcześniej'"></span>
+              </div>
+              <div class="text-sm text-slate-700" x-text="selected.sender_history.status_summary"></div>
+              <div x-show="selected.sender_history.last_categories?.length" class="text-xs text-slate-500 mt-1">
+                Ostatnie kategorie:
+                <template x-for="c in (selected.sender_history.last_categories || [])">
+                  <span class="inline-block px-1.5 py-0.5 rounded mr-1 text-[10px]"
+                        :class="categoryClass(c)" x-text="categoryLabel(c)"></span>
+                </template>
+              </div>
+              <div x-show="selected.sender_history.last_sent_at" class="text-xs text-slate-500 mt-1">
+                ✉️ Ostatnia odpowiedź Adama: <b x-text="formatTime(selected.sender_history.last_sent_at)"></b>
+                <span x-show="selected.sender_history.last_sent_subject" x-text="' — „' + (selected.sender_history.last_sent_subject || '').slice(0,80) + '”'"></span>
+              </div>
+            </div>
+          </template>
+
+          <!-- TREŚĆ MAILA -->
+          <details class="mt-3" open>
+            <summary class="cursor-pointer text-sm font-medium text-slate-600 select-none">📧 Treść maila</summary>
+            <div class="border-t pt-3 mt-2 whitespace-pre-wrap text-sm text-slate-700 max-h-80 overflow-y-auto bg-slate-50 p-3 rounded font-sans mail-body"
+                 x-html="renderBody(pickBody(selected.body_text, selected.body_html))"></div>
+          </details>
+
+          <!-- CO KLON POMYŚLAŁ -->
+          <div class="mt-4 pt-3 border-t">
+            <div class="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs">🤖</span>
+              Co Klon pomyślał
+            </div>
+            <div class="bg-slate-900 text-slate-100 p-3 rounded mb-2 text-sm leading-relaxed italic">
+              <span x-text="selected.action_reason || 'Brak rozumowania (mail nie został przeanalizowany).'"></span>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div class="bg-slate-50 p-2 rounded">
+                <div class="text-slate-400 uppercase text-[10px]">Kategoria</div>
+                <div class="font-medium" x-text="selected.category || '—'"></div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded">
+                <div class="text-slate-400 uppercase text-[10px]">Pilność</div>
+                <div class="font-medium"><span x-text="selected.urgency || '—'"></span>/5</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded">
+                <div class="text-slate-400 uppercase text-[10px]">Sentyment</div>
+                <div class="font-medium" x-text="selected.sentiment || '—'"></div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded">
+                <div class="text-slate-400 uppercase text-[10px]">Akcja</div>
+                <div class="font-medium" x-text="selected.suggested_action || '—'"></div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-600 mt-2"><b>Streszczenie:</b> <span x-text="selected.summary || '—'"></span></div>
+            <div x-show="selected.injection_risk && selected.injection_risk !== 'safe'"
+                 class="text-red-700 font-medium text-xs mt-2">⚠️ Injection risk: <span x-text="selected.injection_risk"></span></div>
+          </div>
+
+          <!-- NEEDS DECISION -->
+          <template x-if="selected.draft_strategy === 'needs_decision' && !selected.draft">
+            <div class="mt-4 pt-3 border-t">
+              <div class="text-sm font-medium text-amber-700 mb-2">🤔 Wymaga decyzji — wybierz kierunek odpowiedzi:</div>
+              <div class="space-y-2">
+                <template x-for="(opt, idx) in selected.decision_options" :key="idx">
+                  <button @click="chooseDecision(opt.label)"
+                          class="w-full text-left p-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded">
+                    <div class="font-medium text-sm" x-text="opt.label"></div>
+                    <div class="text-xs text-slate-600 mt-1" x-text="opt.context"></div>
+                  </button>
+                </template>
+                <details class="mt-2">
+                  <summary class="cursor-pointer text-sm text-slate-600">Inny kierunek...</summary>
+                  <div class="mt-2 flex gap-2">
+                    <input type="text" x-model="customDecision" placeholder="Napisz własny kierunek"
+                           class="flex-1 px-3 py-2 border rounded text-sm">
+                    <button @click="chooseDecision(customDecision); customDecision=''"
+                            :disabled="!customDecision"
+                            class="px-3 py-2 bg-amber-600 text-white rounded text-sm disabled:opacity-50">Generuj</button>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </template>
+
+          <!-- INFO O WYSŁANYM (dla status=sent) -->
+          <template x-if="selected.status === 'sent' && selected.draft">
+            <div class="mt-4 pt-3 border-t border-zinc-200">
+              <div class="rounded-lg p-3 border border-zinc-200 bg-zinc-50 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
+                     :class="selected.auto_replied ? 'bg-cyan-100 text-cyan-700' : 'bg-emerald-100 text-emerald-700'">
+                  <span class="text-sm font-semibold" x-text="selected.auto_replied ? '🚀' : '✓'"></span>
+                </div>
+                <div class="flex-1">
+                  <div class="font-semibold text-sm text-zinc-900">
+                    <span x-show="selected.auto_replied">Wysłane przez Klona</span>
+                    <span x-show="!selected.auto_replied">Wysłane przez Ciebie</span>
+                  </div>
+                  <div class="text-[11px] mt-0.5 text-zinc-500 mono">
+                    <span x-show="selected.draft.sent_at" x-text="formatTime(selected.draft.sent_at)"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- DRAFT / WYSŁANA ODPOWIEDŹ -->
+          <template x-if="selected.draft">
+            <div class="mt-4 pt-3 border-t">
+              <div class="flex items-baseline justify-between mb-2">
+                <div class="text-sm font-medium text-slate-600">
+                  <span x-show="selected.status === 'sent'">📨 Treść wysłanej odpowiedzi</span>
+                  <span x-show="selected.status !== 'sent'">✍️ Draft odpowiedzi</span>
+                  <span class="text-xs text-slate-400 ml-2">v<span x-text="selected.draft.version"></span>
+                    <span x-show="selected.status !== 'sent'"> • pewność <span x-text="((selected.draft.confidence || 0) * 100).toFixed(0)"></span>%</span>
+                  </span>
+                </div>
+                <button x-show="selected.status !== 'sent'" @click="regenerate(selected.id)" class="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded">🔄 Regeneruj</button>
+              </div>
+
+              <!-- Edytowalna treść (drafty) -->
+              <textarea x-show="selected.status !== 'sent'"
+                        x-model="selected.draft.body"
+                        class="w-full border border-slate-300 rounded-lg p-3 text-sm font-sans focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent leading-relaxed"
+                        rows="12"></textarea>
+
+              <!-- Read-only preview (wysłane) -->
+              <div x-show="selected.status === 'sent'"
+                   class="w-full border border-slate-200 rounded-lg p-3 text-sm font-sans bg-slate-50 whitespace-pre-wrap leading-relaxed text-slate-700"
+                   x-text="selected.draft.body"></div>
+
+              <template x-if="selected.status !== 'sent' && selected.draft.placeholders && selected.draft.placeholders.length">
+                <div class="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs">
+                  <b class="text-red-700">⚠️ Do uzupełnienia:</b>
+                  <template x-for="p in selected.draft.placeholders">
+                    <div class="text-red-700">• <span x-text="p"></span></div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="selected.status !== 'sent' && selected.draft.uncertain_claims && selected.draft.uncertain_claims.length">
+                <div class="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs">
+                  <b class="text-amber-700">🟡 Niepewne:</b>
+                  <template x-for="c in selected.draft.uncertain_claims">
+                    <div class="text-amber-700">• <span x-text="c.claim"></span> <span class="text-slate-500">— <span x-text="c.reason"></span></span></div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="selected.draft.facts_used && selected.draft.facts_used.length">
+                <details class="mt-2">
+                  <summary class="cursor-pointer text-xs text-slate-500">🟢 Użyte fakty (<span x-text="selected.draft.facts_used.length"></span>)</summary>
+                  <div class="mt-1 text-xs text-slate-600">
+                    <template x-for="f in selected.draft.facts_used">
+                      <div>• <b x-text="f.fact"></b> <span class="text-slate-400">← <span x-text="f.source"></span></span></div>
+                    </template>
+                  </div>
+                </details>
+              </template>
+
+              <template x-if="selected.status !== 'sent' && selected.draft.verifier && selected.draft.verifier.flags && selected.draft.verifier.flags.length">
+                <div class="mt-3 border-2 rounded p-2"
+                     :class="selected.draft.verifier.can_send ? 'border-amber-300 bg-amber-50' : 'border-red-300 bg-red-50'">
+                  <div class="text-sm font-bold mb-2"
+                       :class="selected.draft.verifier.can_send ? 'text-amber-800' : 'text-red-800'">
+                    🛡️ Verifier:
+                    <span x-show="!selected.draft.verifier.can_send">🔴 WYSYŁKA ZABLOKOWANA</span>
+                    <span x-show="selected.draft.verifier.can_send && selected.draft.verifier.needs_ack">🟡 Wymaga sprawdzenia</span>
+                  </div>
+                  <template x-for="(f, idx) in selected.draft.verifier.flags" :key="idx">
+                    <div class="text-xs mb-1"
+                         :class="f.severity === 'red' ? 'text-red-700' : f.severity === 'yellow' ? 'text-amber-700' : 'text-emerald-700'">
+                      <span x-text="f.severity === 'red' ? '🔴' : f.severity === 'yellow' ? '🟡' : '🟢'"></span>
+                      <b x-text="'['+f.category+']'"></b>
+                      <span x-text="f.message"></span>
+                    </div>
+                  </template>
+                  <label x-show="selected.draft.verifier.needs_ack && selected.draft.verifier.can_send"
+                         class="flex items-center gap-2 mt-2 text-xs">
+                    <input type="checkbox" x-model="verifierAcked">
+                    Sprawdziłem żółte flagi, akceptuję
+                  </label>
+                </div>
+              </template>
+
+              <!-- Akcje (tylko dla niewysłanych) -->
+              <div x-show="selected.status !== 'sent'" class="mt-3 flex gap-2 flex-wrap">
+                <button @click="saveEdit(selected.id, selected.draft.body)"
+                        class="px-3 py-2 bg-slate-200 hover:bg-slate-300 rounded-lg text-sm font-medium transition">💾 Zapisz</button>
+                <button @click="learnFromEdit(selected.id, selected.draft.body)"
+                        :disabled="learning"
+                        class="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg text-sm font-medium disabled:opacity-50 transition">
+                  <span x-show="!learning">🧠 Zapisz i naucz Klona</span>
+                  <span x-show="learning">🧠 Uczę się...</span>
+                </button>
+                <button @click="confirmSend(selected.id)"
+                        :disabled="(selected.draft.placeholders && selected.draft.placeholders.length > 0) || (selected.draft.verifier && !selected.draft.verifier.can_send) || (selected.draft.verifier && selected.draft.verifier.needs_ack && !verifierAcked)"
+                        class="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:bg-slate-400 transition">📤 Wyślij</button>
+                <button @click="archive(selected.id)"
+                        class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm ml-auto transition">🗑️ Archiwizuj</button>
+              </div>
+            </div>
+          </template>
+
+          <div class="mt-4 pt-3 border-t text-xs text-slate-400">
+            ID: <span x-text="selected.id"></span> • Status: <span x-text="selected.status"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <footer class="mt-8 text-center text-xs text-slate-400">
+    Klon • agent mailowy
+  </footer>
+</div>
+
+<!-- ========== AGENT LOG STREAM (fixed bottom) ========== -->
+<div x-data="agentStream()" x-init="init()"
+     class="fixed bottom-0 right-4 z-40"
+     :class="open ? 'w-[460px]' : 'w-auto'">
+  <button @click="open = !open"
+          class="bg-slate-900 text-white px-3 py-1.5 rounded-t-md text-xs font-medium flex items-center gap-2 shadow-lg hover:bg-slate-800">
+    <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span>
+    <span>Klon — log działań</span>
+    <span class="text-slate-400" x-text="entries.length + ' wpisów'"></span>
+    <span class="ml-2 text-slate-400" x-text="open ? '▼' : '▲'"></span>
+  </button>
+  <div x-show="open" x-cloak
+       class="bg-slate-900 text-slate-100 agent-log text-[11px] max-h-72 overflow-y-auto p-2 rounded-tl-md shadow-2xl border-t border-slate-700">
+    <template x-if="entries.length === 0">
+      <div class="text-slate-500 italic p-2">Cisza... Klon czeka na nowe maile.</div>
+    </template>
+    <template x-for="e in entries" :key="e.id">
+      <div class="py-0.5 px-1 hover:bg-slate-800 rounded flex gap-2">
+        <span class="text-slate-500 flex-shrink-0" x-text="formatLogTime(e.timestamp)"></span>
+        <span class="flex-shrink-0"
+              :class="{
+                'text-emerald-400': e.level === 'success',
+                'text-amber-400': e.level === 'warn',
+                'text-red-400': e.level === 'error',
+                'text-blue-400': e.level === 'action',
+                'text-slate-300': e.level === 'info',
+              }"
+              x-text="iconForLevel(e.level)"></span>
+        <span class="flex-1" x-text="e.message"></span>
+      </div>
+    </template>
+  </div>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    me: '...',
+    accounts: [],
+    mails: [],
+    proposals: [],
+    proposalsOpen: false,
+    stats: null,
+    status: null,
+    selected: null,
+    selectedAccountId: null,
+    filter: null,
+    clientFilter: null,
+    loading: false,
+    customDecision: '',
+    verifierAcked: false,
+    learning: false,
+    chatInput: '',
+    chatLoading: false,
+    chatHistory: [],   // [{role, content, timestamp, actions?}]
+
+    filters: [
+      { value: null, label: 'Wszystkie' },
+      { value: 'analyzed', label: 'Przeanalizowane' },
+      { value: 'drafted', label: 'Z draftem' },
+      { value: 'sent', label: 'Wysłane' },
+      { value: 'auto_archived', label: 'Auto-archiwum' },
+    ],
+
+    get totalPending() {
+      return this.accounts.reduce((s, a) => s + (a.pending_count || 0), 0);
+    },
+
+    get briefSummary() {
+      const drafts = this.status?.pending?.drafts_to_review || 0;
+      const decisions = this.status?.pending?.decisions || 0;
+      const auto = this.status?.pending?.auto_archived_today || 0;
+      const replied = this.status?.pending?.auto_replied_today || 0;
+      const totalActionable = drafts + decisions;
+      let message;
+      if (totalActionable === 0 && auto === 0 && replied === 0) {
+        message = 'Hej. Cisza w skrzynce, nic nowego do obsługi.';
+      } else if (totalActionable === 0) {
+        const parts = [];
+        if (replied > 0) parts.push(`sam odpowiedziałem na ${replied}`);
+        if (auto > 0) parts.push(`${auto} zarchiwizowałem (powiadomienia/spam)`);
+        message = `Hej. Wszystko obsłużone. Dziś ${parts.join(', ')}, nic nie wymaga Twojej uwagi.`;
+      } else {
+        const lines = [`Hej. Mamy ${totalActionable} ${totalActionable === 1 ? 'mail' : (totalActionable < 5 ? 'maile' : 'maili')} do obsługi:`];
+        if (drafts > 0) lines.push(`• ${drafts} z draftami, gotowe do zatwierdzenia.`);
+        if (decisions > 0) lines.push(`• ${decisions} ${decisions === 1 ? 'wymaga' : (decisions < 5 ? 'wymagają' : 'wymaga')} Twojej decyzji o kierunku odpowiedzi.`);
+        const extras = [];
+        if (replied > 0) extras.push(`sam odpowiedziałem na ${replied}`);
+        if (auto > 0) extras.push(`${auto} zarchiwizowałem`);
+        if (extras.length) lines.push(`(Plus ${extras.join(', ')} dziś.)`);
+        message = lines.join('\n');
+      }
+      return { drafts, decisions, auto, replied, totalActionable, message };
+    },
+
+    get filteredMails() {
+      if (!this.clientFilter) return this.mails;
+      if (this.clientFilter === 'needs_decision') {
+        return this.mails.filter(m => m.draft_strategy === 'needs_decision' && !m.chosen_decision && m.status !== 'sent');
+      }
+      // auto_replied filter idzie przez backend (?auto_replied=true), tu nic nie filtrujemy
+      return this.mails;
+    },
+
+    quickFilter(target) {
+      if (target === 'needs_decision') {
+        this.filter = null;
+        this.clientFilter = 'needs_decision';
+      } else if (target === 'drafted') {
+        this.filter = 'drafted';
+        this.clientFilter = null;
+      } else if (target === 'archived') {
+        this.filter = 'auto_archived';
+        this.clientFilter = null;
+      } else if (target === 'auto_replied') {
+        this.filter = null;
+        this.clientFilter = 'auto_replied';
+      } else if (target === 'all') {
+        this.filter = null;
+        this.clientFilter = null;
+      }
+      this.reload();
+      setTimeout(() => {
+        document.getElementById('mail-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    },
+
+    async init() {
+      const r = await fetch('/api/me').then(r => r.json());
+      this.me = r.email;
+      await this.refresh();
+      await this.loadProposals();
+      setInterval(() => this.refresh(), 30000);
+    },
+
+    async refresh() {
+      await Promise.all([this.loadAccounts(), this.loadMails(), this.loadStats(), this.loadStatus()]);
+    },
+
+    async loadStats() {
+      try { this.stats = await fetch('/api/stats').then(r => r.json()); }
+      catch(e) { console.error(e); }
+    },
+
+    async loadStatus() {
+      try { this.status = await fetch('/api/agent/status').then(r => r.json()); }
+      catch(e) { console.error(e); }
+    },
+
+    async loadAccounts() {
+      try { this.accounts = await fetch('/api/accounts').then(r => r.json()); }
+      catch(e) { console.error(e); }
+    },
+
+    selectAccount(id) {
+      this.selectedAccountId = id;
+      this.reload();
+    },
+
+    async reload() {
+      await this.loadMails();
+    },
+
+    async loadMails() {
+      this.loading = true;
+      try {
+        const params = new URLSearchParams();
+        if (this.filter) params.set('status', this.filter);
+        if (this.selectedAccountId) params.set('account_id', this.selectedAccountId);
+        if (this.clientFilter === 'auto_replied') params.set('auto_replied', 'true');
+        const url = '/api/mails' + (params.toString() ? '?' + params.toString() : '');
+        this.mails = await fetch(url).then(r => r.json());
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    },
+
+    async openMail(id) {
+      this.verifierAcked = false;
+      this.selected = await fetch('/api/mails/' + id).then(r => r.json());
+    },
+
+    pickBody(plain, html) {
+      if (!plain && !html) return '';
+      if (!html) return plain;
+      if (!plain) return html;
+      const stubMarkers = [
+        /can'?t display html/i, /view (this|the) (newsletter|email|message) (in|on)/i,
+        /click here to view/i, /view (this|in) browser/i, /trouble viewing/i,
+        /problem(s|y)? (z|with) wyświetlaniem/i, /jeśli (mail|wiadomość) nie wyświetla się/i,
+        /zobacz w przeglądarce/i,
+      ];
+      if (stubMarkers.some(rx => rx.test(plain))) return html;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      tmp.querySelectorAll('style,script').forEach(e => e.remove());
+      const htmlText = (tmp.textContent || '').trim();
+      if (plain.trim().length < 200 && htmlText.length > plain.trim().length * 3) return html;
+      return plain;
+    },
+
+    escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    },
+    escapeAttr(s) { return this.escapeHtml(s); },
+
+    renderBody(text) {
+      if (!text) return '(brak treści)';
+      if (!/<[a-z][^>]*>/i.test(text)) {
+        let plain = text
+          .replace(/ /g, ' ')
+          .split('\n')
+          .map(line => line.replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''))
+          .join('\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        const escaped = this.escapeHtml(plain);
+        return escaped.replace(/(https?:\/\/[^\s<]+)/g,
+          '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+      }
+      let html = text;
+      html = html.replace(/<br\s*\/?>/gi, '\n');
+      html = html.replace(/<\/(p|div|h[1-6]|li|tr|blockquote|article|section)>/gi, '\n\n');
+      html = html.replace(/<\/td>/gi, ' ');
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      tmp.querySelectorAll('style,script,head,meta,link,iframe,object,embed,svg').forEach(e => e.remove());
+      const self = this;
+      const walk = (node) => {
+        if (node.nodeType === 3) return self.escapeHtml(node.textContent);
+        if (node.nodeType !== 1) return '';
+        const tag = node.tagName;
+        if (tag === 'A') {
+          const href = node.getAttribute('href') || '';
+          const inner = Array.from(node.childNodes).map(walk).join('').trim();
+          if (!href || /^javascript:/i.test(href)) return inner;
+          if (href.startsWith('mailto:') || href.startsWith('#')) return inner || self.escapeHtml(href);
+          return `<a href="${self.escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${inner || self.escapeHtml(href)}</a>`;
+        }
+        if (tag === 'IMG') {
+          const alt = node.getAttribute('alt') || '';
+          return alt ? `[obraz: ${self.escapeHtml(alt)}]` : '';
+        }
+        return Array.from(node.childNodes).map(walk).join('');
+      };
+      let out = walk(tmp);
+      return out.replace(/&nbsp;/gi, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    },
+
+    async chooseDecision(label) {
+      if (!label || !this.selected) return;
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/mails/${this.selected.id}/decide`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label})
+        });
+        if (r.ok) this.selected = await r.json();
+        else alert('Błąd generowania draftu: ' + r.status);
+      } catch(e) { console.error(e); }
+      this.loading = false;
+      await this.loadMails();
+    },
+
+    async regenerate(id) {
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/mails/${id}/regenerate`, {method: 'POST'});
+        if (r.ok) this.selected = await r.json();
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    },
+
+    async saveEdit(id, body) {
+      try {
+        await fetch(`/api/mails/${id}/edit-draft`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({body})
+        });
+        alert('✅ Zapisano edycję');
+      } catch(e) { console.error(e); }
+    },
+
+    async sendChat() {
+      const text = this.chatInput.trim();
+      if (!text || this.chatLoading) return;
+      const userMsg = { role: 'user', content: text, timestamp: this._nowHHMM() };
+      this.chatHistory.push(userMsg);
+      this.chatInput = '';
+      this.chatLoading = true;
+      try {
+        // Backend dostaje tylko role+content (bez timestamp/actions, tych OpenAI nie potrzebuje)
+        const apiMessages = this.chatHistory.map(m => ({ role: m.role, content: m.content }));
+        const r = await fetch('/api/agent/chat', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ messages: apiMessages }),
+        });
+        const data = await r.json();
+        this.chatHistory.push({
+          role: 'assistant',
+          content: data.reply || '(brak odpowiedzi)',
+          timestamp: this._nowHHMM(),
+          actions: data.actions || [],
+        });
+        // Refresh propozycji jeśli były tool calls które tworzyły propozycje
+        if ((data.actions || []).some(a => a.result?.proposal_id)) {
+          await this.loadProposals();
+        }
+      } catch(e) {
+        console.error(e);
+        this.chatHistory.push({
+          role: 'assistant',
+          content: 'Błąd połączenia: ' + e,
+          timestamp: this._nowHHMM(),
+        });
+      }
+      this.chatLoading = false;
+    },
+
+    _nowHHMM() {
+      const d = new Date();
+      return [d.getHours(), d.getMinutes()].map(n => String(n).padStart(2, '0')).join(':');
+    },
+
+    async learnFromEdit(id, body) {
+      this.learning = true;
+      try {
+        const r = await fetch(`/api/mails/${id}/learn-from-edit`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({body})
+        });
+        const data = await r.json();
+        if (data.learned) {
+          alert(`✅ Klon się uczy:\n\n„${data.title}”\n\n${data.rule}\n\nPropozycja czeka na zatwierdzenie w sekcji Propozycje.`);
+          await this.loadProposals();
+        } else {
+          alert(`💾 Zapisano. (Klon nie wyciągnął nowej reguły: ${data.reason})`);
+        }
+      } catch(e) {
+        console.error(e);
+        alert('❌ Błąd uczenia: ' + e);
+      }
+      this.learning = false;
+    },
+
+    async confirmSend(id) {
+      if (!confirm('⚠️ WYSŁAĆ TERAZ?\n\nMail zostanie wysłany natychmiast.')) return;
+      try {
+        const r = await fetch(`/api/mails/${id}/send`, {method: 'POST'});
+        if (r.ok) {
+          alert('✅ Wysłano');
+          this.selected = null;
+          await this.loadMails();
+          await this.loadStatus();
+        } else alert('❌ Błąd: ' + r.status);
+      } catch(e) { console.error(e); }
+    },
+
+    async loadProposals() {
+      try { this.proposals = await fetch('/api/proposals').then(r => r.json()); }
+      catch(e) { this.proposals = []; }
+    },
+
+    async acceptProposal(p) {
+      let msg = 'Zaakceptować tę propozycję?';
+      if (p.target === 'firma_yaml') {
+        msg = '⚠️ Dla firma.yaml akceptacja TYLKO oznacza propozycję jako "do zrobienia".\n\nFakty o firmie musisz dopisać RĘCZNIE w DATA/facts/firma.yaml.\n\nKontynuować?';
+      }
+      if (!confirm(msg)) return;
+      try {
+        const r = await fetch(`/api/proposals/${p.id}/accept`, {method:'POST'});
+        if (r.ok) { alert('✅ Zaakceptowano'); await this.loadProposals(); }
+      } catch(e) { console.error(e); }
+    },
+
+    async rejectProposal(id) {
+      try {
+        await fetch(`/api/proposals/${id}/reject`, {method:'POST'});
+        await this.loadProposals();
+      } catch(e) { console.error(e); }
+    },
+
+    async archive(id) {
+      if (!confirm('Archiwizować?')) return;
+      try {
+        await fetch(`/api/mails/${id}/archive`, {method: 'POST'});
+        this.selected = null;
+        await this.loadMails();
+        await this.loadStatus();
+      } catch(e) { console.error(e); }
+    },
+
+    formatTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      const now = new Date();
+      const diff = (now - d) / 1000;
+      if (diff < 60) return 'przed chwilą';
+      if (diff < 3600) return Math.floor(diff/60) + ' min temu';
+      if (diff < 86400) return Math.floor(diff/3600) + ' h temu';
+      return d.toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    },
+
+    categoryLabel(cat) {
+      return ({
+        lead_cena:'lead · cena', lead_demo:'lead · demo', lead_pytanie:'lead · pytanie',
+        klient_pytanie:'klient · pytanie', klient_reklamacja:'reklamacja',
+        klient_potwierdzenie:'klient · ack', klient_support:'support',
+        platnosc_problem:'płatność', partnerstwo:'partnerstwo',
+        spam:'spam', newsletter:'newsletter', powiadomienie:'powiadomienie', inne:'inne',
+      }[cat] || cat);
+    },
+    categoryClass(cat) {
+      // Wszystkie kategorie używają tego samego subtle stylu — kolor tylko w status pills
+      return 'bg-zinc-50 text-zinc-700 border border-zinc-200';
+    },
+
+    slaThresholdMin(cat) {
+      return ({
+        platnosc_problem:30, klient_reklamacja:30, klient_support:60, lead_cena:60,
+        lead_demo:120, lead_pytanie:120, klient_pytanie:180, partnerstwo:480,
+        klient_potwierdzenie:1440,
+      }[cat] || null);
+    },
+    needsResponseSLA(m) {
+      if (!m.received_at) return false;
+      if (['sent','archived','auto_archived','ignored'].includes(m.status)) return false;
+      return this.slaThresholdMin(m.category) !== null;
+    },
+    slaMinutesElapsed(m) {
+      if (!m.received_at) return 0;
+      return Math.floor((new Date() - new Date(m.received_at)) / 60000);
+    },
+    slaPercent(m) {
+      const t = this.slaThresholdMin(m.category);
+      if (!t) return 0;
+      return (this.slaMinutesElapsed(m) / t) * 100;
+    },
+    slaLabel(m) {
+      const min = this.slaMinutesElapsed(m);
+      const t = this.slaThresholdMin(m.category);
+      const fmt = (mn) => mn < 60 ? `${mn}m` : `${Math.floor(mn/60)}h${mn%60 ? ' '+(mn%60)+'m' : ''}`;
+      if (this.slaPercent(m) >= 100) return `${fmt(min)} (po SLA ${fmt(t)})`;
+      return `${fmt(min)} / ${fmt(t)}`;
+    },
+    slaClass(m) {
+      const pct = this.slaPercent(m);
+      if (pct >= 100) return 'bg-red-50 text-red-700 border-red-200 font-semibold';
+      if (pct >= 70)  return 'bg-amber-50 text-amber-700 border-amber-200';
+      return 'bg-zinc-50 text-zinc-600 border-zinc-200';
+    },
+  };
+}
+
+function agentStream() {
+  return {
+    open: true, entries: [], lastId: 0, pollHandle: null,
+    async init() {
+      await this.loadAgentLog(true);
+      this.pollHandle = setInterval(() => this.loadAgentLog(false), 5000);
+    },
+    async loadAgentLog(initial) {
+      try {
+        const url = initial ? '/api/agent/log?limit=50' : `/api/agent/log?since_id=${this.lastId}&limit=50`;
+        const data = await fetch(url).then(r => r.json());
+        if (initial) {
+          this.entries = data;
+          if (data.length) this.lastId = Math.max(...data.map(e => e.id));
+        } else if (data.length) {
+          this.entries = [...this.entries, ...data].slice(-200);
+          this.lastId = Math.max(...data.map(e => e.id));
+        }
+      } catch(e) { console.error(e); }
+    },
+    formatLogTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+    },
+    iconForLevel(level) {
+      return {success:'✓', warn:'⚠', error:'✗', action:'→', info:'·'}[level] || '·';
+    },
+  };
+}
+</script>
+</body>
+</html>

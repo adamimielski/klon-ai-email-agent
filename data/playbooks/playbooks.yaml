@@ -1,0 +1,128 @@
+# Playbooks — wzorce odpowiedzi per kategoria maila.
+#
+# Klon używa tego dla draftów. Każda kategoria może mieć:
+#   name        — nazwa wzorca (do podglądu w UI)
+#   instruction — jak Klon ma podejść (1-3 zdania)
+#   must_include — lista rzeczy które MUSZĄ być w odpowiedzi
+#   must_avoid   — czego NIE używać
+#   template    — szkielet odpowiedzi (luźny, Klon dostosowuje do kontekstu)
+#
+# Edytuj swobodnie. Po zmianie: deploy na serwer i restart workera.
+
+lead_cena:
+  name: "Pytanie o cenę"
+  instruction: |
+    Lead pyta o cenę. Podaj konkretną cenę z firma.yaml (NIE zmyślaj). Nawiąż do potrzeby
+    którą wyraził w mailu. Zaproponuj kolejny krok (rozmowa 15 min lub od razu zakup).
+  must_include:
+    - "konkretna cena (z firma.yaml)"
+    - "propozycja następnego kroku"
+  must_avoid:
+    - "mgliste obietnice ROI"
+    - "zniżki bez uzasadnienia"
+    - "korpomowa typu 'zapraszamy do współpracy'"
+  template: |
+    Hej [imię],
+    [krótko: czemu pytanie ma sens, 1 zdanie nawiązania]
+    Cena to [X zł]. [Co dostaje za to.]
+    Chcesz pogadać 15 min czy od razu wchodzisz?
+
+    Adam
+
+lead_demo:
+  name: "Prośba o demo"
+  instruction: |
+    Lead chce demo / call. NIE proponuj konkretnych dni/godzin (bo nie znasz mojego kalendarza).
+    Zamiast tego POPROŚ klienta żeby rzucił 2-3 propozycje terminów. Standardowy call to 30 min
+    (z firma.yaml: procedury.demo.standardowy_czas).
+    Zapytaj 1-2 pytania żeby przygotować się do rozmowy (jaka firma, co głównie chcą zautomatyzować).
+  must_include:
+    - "prośba o 2-3 propozycje terminów od klienta"
+    - "1-2 pytania żeby się przygotować (firma, cel automatyzacji)"
+  must_avoid:
+    - "konkretne propozycje terminów (np. 'czwartek 10:00' - nie znasz kalendarza Adama)"
+    - "ogólnikowe 'kiedy ci pasuje'"
+    - "calendly link (NIE używamy)"
+  template: |
+    Hej [imię],
+    Spoko, pogadajmy. Nie używamy calendly, ustalamy mailowo: rzuć 2-3 propozycje terminów (dzień + godzina), wybiorę pasujący. Standardowo call ok. 30 min.
+    Żebym się przygotował, w 1-2 zdaniach: czym zajmuje się firma i co najbardziej chcecie zautomatyzować?
+
+    Adam
+
+lead_pytanie:
+  name: "Pytanie o produkt"
+  instruction: |
+    Lead pyta o szczegóły produktu (jak działa, co zawiera, dla kogo).
+    Odpowiedz konkretnie z firma.yaml. Jeśli pytanie jest ogólne — podaj 3 najważniejsze rzeczy.
+    Zakończ propozycją: chcesz pełnej oferty / call / od razu kupić.
+  must_include:
+    - "konkretna odpowiedź na pytanie"
+    - "next step (oferta/call/zakup)"
+  must_avoid:
+    - "kopiowanie strony www zamiast personalizacji"
+
+klient_pytanie:
+  name: "Pytanie istniejącego klienta"
+  instruction: |
+    Klient (już kupił coś od nas). Odpowiedz pomocnie, konkretnie. Jeśli to pytanie po zakupie —
+    sprawdź historię nadawcy żeby wiedzieć CO kupił. Krótko, bez korpomowy.
+  must_include:
+    - "konkretna odpowiedź"
+
+klient_reklamacja:
+  name: "Reklamacja klienta"
+  instruction: |
+    PRIORYTET. Klient niezadowolony. NIE bronić się, NIE tłumaczyć. Przeprosić, dopytać o szczegóły,
+    zaproponować rozwiązanie (zwrot / poprawka / call). Trzymać empatię. Jeśli nie wiesz co dokładnie
+    poszło źle — DOPYTAJ zanim zaoferujesz rozwiązanie.
+  must_include:
+    - "uznanie problemu (przepraszam / rozumiem)"
+    - "konkretna propozycja rozwiązania ALBO pytanie o detale"
+  must_avoid:
+    - "obronnie: 'ale przecież'"
+    - "winienie klienta"
+    - "ogólnikowe 'naprawimy to'"
+  template: |
+    Hej [imię],
+    Cholera, przepraszam za [problem]. Rozumiem frustrację.
+    [konkret: co możesz zrobić TERAZ, refund / fix / call]
+    [opcjonalnie: pytanie o detale jeśli potrzebne]
+
+    Adam
+
+klient_potwierdzenie:
+  name: "Potwierdzenie / podziękowanie"
+  instruction: |
+    Klient potwierdza coś / dziękuje. Krótko, ciepło. Nie rozciągaj. 1-2 zdania.
+  must_avoid:
+    - "rozwlekanie"
+    - "nowe propozycje upsellu (chyba że ewidentny moment)"
+
+klient_support:
+  name: "Pomoc techniczna"
+  instruction: |
+    Klient ma problem techniczny (dostęp, błąd, jak coś zrobić). Sprawdź firma.yaml czy jest
+    rozwiązanie znane. Jeśli tak — podaj kroki. Jeśli nie — dopytaj o szczegóły (screen, link,
+    jaki błąd dokładnie).
+  must_include:
+    - "konkretne kroki ALBO precyzyjne pytanie o szczegóły"
+
+platnosc_problem:
+  name: "Problem z płatnością"
+  instruction: |
+    Klient ma problem z płatnością — nie przeszła, brak dostępu po zakupie, faktura, refund.
+    PRIORYTET. Sprawdź historię nadawcy (czy płacił, kiedy, co). Daj konkretne kroki: ponowna
+    próba, link bezpośredni, faktura ręczna, refund. NIE każ klientowi czekać.
+  must_include:
+    - "konkretny krok rozwiązania"
+    - "jeśli refund / problem techniczny — przeprosiny + propozycja"
+
+partnerstwo:
+  name: "Propozycja partnerstwa"
+  instruction: |
+    Ktoś proponuje współpracę / partnership / gościnny content. Przeczytaj uważnie CO proponują.
+    Jeśli wartość niejasna — dopytaj. Jeśli oczywiste cold-pitching bez sensu — odmów grzecznie.
+    Adam preferuje konkretne wymiany wartości, nie "bądźmy partnerami".
+  must_avoid:
+    - "automatyczne 'tak chętnie' bez weryfikacji"
