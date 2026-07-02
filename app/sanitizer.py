@@ -1,6 +1,6 @@
 """Sanitizer treści maila — usuwa ukryty tekst, normalizuje, wykrywa injection.
 
-Warstwa 1 obrony anti-injection (zgodne z ZASADY-AI-MAILE.md).
+Warstwa 1 obrony anti-injection.
 """
 from __future__ import annotations
 

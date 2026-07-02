@@ -44,9 +44,17 @@ Python 3.12 · FastAPI · SQLAlchemy + SQLite · APScheduler · OpenAI API (LLM 
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # add your OpenAI API key
-python -m app.cli_seed        # seed ~47 sample emails across 3 inboxes
-uvicorn app.main:app --reload # dashboard at http://localhost:8000
+python -m app.cli_seed        # init DB + seed ~47 sample emails across 3 inboxes
+uvicorn app.main:app --reload # dashboard at http://localhost:8000 (mails show up as "new")
 ```
+
+Optional — run the worker in a second terminal to process the seeded mail (analyzer + drafter; requires the OpenAI key in `.env`):
+
+```bash
+MAILDASH_FETCH_DISABLED=1 python -m app.workers.fetcher
+```
+
+`MAILDASH_FETCH_DISABLED=1` skips real-mailbox fetching (demo accounts have no credentials). Without the worker, seeded emails simply stay in the "new" state — the dashboard still works.
 
 ## Status
 

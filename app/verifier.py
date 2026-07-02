@@ -173,11 +173,6 @@ def deterministic_check(draft_body: str) -> list[Flag]:
             snippet=m.group(0),
         ))
 
-    # 5. Telefon (informacyjnie)
-    for m in re.finditer(r"\b(?:\+?48\s?)?(?:\d{3}[\s\-]?){3}\b", draft_body):
-        # za szeroka regula — pominęmy
-        pass
-
     return flags
 
 

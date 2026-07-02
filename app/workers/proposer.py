@@ -211,7 +211,10 @@ def propose_facts_gaps(lookback_days: int = 14) -> int:
     with SessionLocal() as db:
         mails = db.scalars(
             select(Mail)
-            .where(Mail.category.in_(["lead", "klient", "support"]),
+            .where(Mail.category.in_([
+                       "lead_cena", "lead_demo", "lead_pytanie",
+                       "klient_pytanie", "klient_reklamacja", "klient_potwierdzenie", "klient_support",
+                   ]),
                    Mail.received_at > cutoff)
             .order_by(Mail.received_at.desc())
             .limit(40)

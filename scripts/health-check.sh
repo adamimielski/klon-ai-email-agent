@@ -11,7 +11,7 @@ api_active=$(systemctl is-active maildash-api 2>/dev/null || echo "fail")
 worker_active=$(systemctl is-active maildash-worker 2>/dev/null || echo "fail")
 
 # Test endpoint /health
-http_ok=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8001/health 2>/dev/null || echo "000")
+http_ok=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health 2>/dev/null || echo "000")
 
 status="ok"
 if [[ "$api_active" != "active" || "$worker_active" != "active" || "$http_ok" != "200" ]]; then

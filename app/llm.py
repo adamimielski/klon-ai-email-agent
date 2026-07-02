@@ -15,8 +15,8 @@ from .config import settings
 
 
 # Modele dostępne — dobieramy do zadania
-MODEL_MINI = "gpt-4o-mini"     # analyzer, verifier, injection detector
-MODEL_PRO = "gpt-4o"           # drafter (jakość)
+MODEL_MINI = "gpt-4o-mini"     # analyzer, drafter, verifier, injection detector
+MODEL_PRO = "gpt-4o"           # dostępny do cięższych zadań (obecnie nieużywany)
 
 
 # Cennik (USD per 1M tokens, stan 2026-05)

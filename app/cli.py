@@ -32,7 +32,7 @@ def _cmd_init_db():
 def _cmd_gen_fernet():
     key = generate_key()
     print(f"FERNET_KEY={key}")
-    print("(dodaj do /opt/mail-dashboard/.env)")
+    print("(dodaj do .env)")
 
 
 def _cmd_add_imap(args):

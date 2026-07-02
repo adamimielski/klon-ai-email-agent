@@ -1,7 +1,4 @@
-"""Modele SQLAlchemy — schema bazy mail-dashboard.
-
-Zgodne z DB schema w PLAN.md (rozdział 5).
-"""
+"""Modele SQLAlchemy — schema bazy mail-dashboard."""
 from datetime import datetime
 from sqlalchemy import (
     String, Integer, Boolean, Float, Text, DateTime, ForeignKey, LargeBinary, Index

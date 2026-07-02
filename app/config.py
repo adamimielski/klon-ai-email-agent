@@ -21,10 +21,10 @@ class Settings(BaseSettings):
     # Klucz Fernet do szyfrowania haseł IMAP / refresh tokenów
     fernet_key: str = ""
 
-    # Klucz Anthropic API (Claude) — zostaw puste do Etapu 4
+    # Klucz Anthropic API (Claude) — opcjonalny
     anthropic_api_key: str = ""
 
-    # Klucz OpenAI (embeddingi do Etapu 3)
+    # Klucz OpenAI (LLM + embeddingi)
     openai_api_key: str = ""
 
     # Hard limit kosztów API (PLN/mc)

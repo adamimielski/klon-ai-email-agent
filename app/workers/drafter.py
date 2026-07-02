@@ -209,7 +209,7 @@ Treść:
 Napisz draft odpowiedzi w imieniu Adama. Pamiętaj:
 1. Każdy konkretny fakt → z firma.yaml (cytuj source w facts_used)
 2. Brak informacji → [DO_UZUPEŁNIENIA: opis]
-3. Styl: Hej [imię], krótko, —Adam
+3. Styl: Hej [imię], krótko, podpis "Adam" w nowej linii
 4. NIE zmyślaj cen, terminów, funkcji
 5. NIE używaj zakazanych obietnic
 6. WYKORZYSTAJ historię nadawcy — jeśli pisał wcześniej, nawiąż („widzę że pisałeś o X"), zachowaj continuity

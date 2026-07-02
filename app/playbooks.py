@@ -10,7 +10,7 @@ Format:
     template: |
       Hej [imię],
       Cena to [X zł]. ...
-      —Adam
+      Adam
 """
 from pathlib import Path
 from typing import Any
